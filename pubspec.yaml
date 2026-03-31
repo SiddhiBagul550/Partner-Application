@@ -1,0 +1,27 @@
+name: fliqaindia_partner_app
+description: "FliqaIndia Partner App – Vendor mobile experience for the FliqaIndia platform."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  firebase_core: ^3.13.1
+  cloud_firestore: ^5.6.6
+  firebase_auth: ^5.5.2
+  google_fonts: ^6.2.1
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
