@@ -4,6 +4,24 @@ enum DurationType { halfDay, fullDay, multiDay }
 
 enum EventStatus { upcoming, ongoing, completed }
 
+class EventRole {
+  final String category;
+  final int vacancies;
+  final List<String> committedVendors;
+
+  EventRole({required this.category, required this.vacancies, required this.committedVendors});
+
+  factory EventRole.fromMap(Map<String, dynamic> data) {
+    return EventRole(
+      category: data['category'] ?? '',
+      vacancies: data['vacancies'] ?? 1,
+      committedVendors: List<String>.from(data['committedVendors'] ?? []),
+    );
+  }
+
+  bool get isFull => committedVendors.length >= vacancies;
+}
+
 class EventModel {
   final String id;
   final String name;
@@ -13,15 +31,55 @@ class EventModel {
   final DurationType durationType;
   final String? timeSlot; // 'morning' | 'evening'
   final double budget;
-  final String category;
+  final List<EventRole> roles;
   final String? description;
-  final EventStatus status;
-  final int vacancies;
+  final EventStatus _dbStatus;
   final List<String> committedVendors;
   final Timestamp? createdAt;
+  final Timestamp? fullAt;
 
-  bool get isFull => committedVendors.length >= vacancies;
+  int get vacancies => roles.fold(0, (sum, role) => sum + role.vacancies);
+  bool get isFull => roles.every((role) => role.isFull);
   int get filledCount => committedVendors.length;
+
+  EventStatus get status {
+    if (_dbStatus == EventStatus.completed) return EventStatus.completed;
+    if (date.isEmpty) return _dbStatus;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    DateTime? startDate;
+    DateTime? endDate;
+    
+    try {
+      startDate = DateTime.parse(date);
+      startDate = DateTime(startDate.year, startDate.month, startDate.day);
+      
+      if (dateEnd != null && dateEnd!.isNotEmpty) {
+        endDate = DateTime.parse(dateEnd!);
+        endDate = DateTime(endDate.year, endDate.month, endDate.day);
+      } else {
+        endDate = startDate;
+      }
+    } catch (_) {
+      return _dbStatus;
+    }
+
+    if (today.isBefore(startDate)) {
+      return EventStatus.upcoming;
+    } else if (today.isAfter(endDate)) {
+      return EventStatus.completed;
+    } else {
+      return EventStatus.ongoing;
+    }
+  }
+  
+  bool get isVanishable {
+    if (!isFull || fullAt == null) return false;
+    final diff = DateTime.now().difference(fullAt!.toDate());
+    return diff.inHours >= 24;
+  }
 
   EventModel({
     required this.id,
@@ -32,13 +90,13 @@ class EventModel {
     required this.durationType,
     this.timeSlot,
     required this.budget,
-    required this.category,
+    required this.roles,
     this.description,
-    required this.status,
-    this.vacancies = 1,
+    required EventStatus status,
     this.committedVendors = const [],
     this.createdAt,
-  });
+    this.fullAt,
+  }) : _dbStatus = status;
 
   factory EventModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
@@ -51,12 +109,12 @@ class EventModel {
       durationType: _parseDuration(d['durationType']),
       timeSlot: d['timeSlot'],
       budget: (d['budget'] ?? 0).toDouble(),
-      category: d['category'] ?? '',
+      roles: (d['roles'] as List<dynamic>?)?.map((r) => EventRole.fromMap(r)).toList() ?? [],
       description: d['description'],
       status: _parseStatus(d['status']),
-      vacancies: d['vacancies'] ?? 1,
       committedVendors: List<String>.from(d['committedVendors'] ?? []),
       createdAt: d['createdAt'],
+      fullAt: d['fullAt'],
     );
   }
 

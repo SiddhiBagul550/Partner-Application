@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
+import '../models/event_model.dart';
+import '../services/event_service.dart';
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
@@ -11,39 +14,12 @@ class ProjectsScreen extends StatefulWidget {
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
   int _tabIndex = 0;
-  static const _tabs = ['Ongoing', 'Completed', 'Pending'];
-
-  static const _projects = [
-    {
-      'client': 'Ananya & Vikram Wedding',
-      'city': 'Kolkata',
-      'date': 'Mar 15',
-      'budget': '₹28,000',
-      'status': 'pending',
-      'tab': 0,
-    },
-    {
-      'client': 'TechCorp Brand Shoot',
-      'city': 'Mumbai',
-      'date': 'Mar 22',
-      'budget': '₹15,000',
-      'status': 'paid',
-      'tab': 1,
-    },
-    {
-      'client': 'Corporate Gala – Kolkata',
-      'city': 'Kolkata',
-      'date': 'Mar 30',
-      'budget': '₹22,000',
-      'status': 'pending',
-      'tab': 2,
-    },
-  ];
+  static const _tabs = ['Upcoming', 'Ongoing', 'Completed'];
 
   @override
   Widget build(BuildContext context) {
-    final filtered =
-        _projects.where((p) => p['tab'] == _tabIndex).toList();
+    final vendorEmail = FirebaseAuth.instance.currentUser?.email ?? '';
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -93,26 +69,57 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ),
           const SizedBox(height: 14),
           Expanded(
-            child: filtered.isEmpty
-                ? Center(
+            child: StreamBuilder<List<EventModel>>(
+              stream: EventService().vendorEventsStream(vendorEmail),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator(color: AppColors.gold));
+                }
+
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text('Error loading projects', style: GoogleFonts.dmSans(color: AppColors.red)),
+                  );
+                }
+
+                final events = snapshot.data ?? [];
+                
+                // Map the EventStatus enum directly into the _tabs indexes
+                // 0 -> Upcoming
+                // 1 -> Ongoing
+                // 2 -> Completed
+                final filtered = events.where((e) {
+                  if (_tabIndex == 0 && e.status == EventStatus.upcoming) return true;
+                  if (_tabIndex == 1 && e.status == EventStatus.ongoing) return true;
+                  if (_tabIndex == 2 && e.status == EventStatus.completed) return true;
+                  return false;
+                }).toList();
+
+                if (filtered.isEmpty) {
+                  return Center(
                     child: Text(
-                      'No ${_tabs[_tabIndex].toLowerCase()} projects.',
+                      'No ${_tabs[_tabIndex].toLowerCase()} projects found.',
                       style: GoogleFonts.dmSans(color: AppColors.whiteDim),
                     ),
-                  )
-                : ListView(
-                    children: filtered.map(_buildCard).toList(),
-                  ),
+                  );
+                }
+
+                return ListView(
+                  children: filtered.map((e) => _buildCard(e)).toList(),
+                );
+              },
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCard(Map<String, Object> project) {
-    final isPaid = project['status'] == 'paid';
-    final badgeColor = isPaid ? AppColors.green : AppColors.gold;
-    final badgeLabel = isPaid ? 'Paid' : 'Pending';
+  Widget _buildCard(EventModel event) {
+    final isDone = event.status == EventStatus.completed;
+    final badgeColor = isDone ? AppColors.green : AppColors.gold;
+    final badgeLabel = isDone ? 'Done' : (event.status == EventStatus.ongoing ? 'Active' : 'Pending');
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -140,7 +147,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      project['client'] as String,
+                      event.name,
                       style: GoogleFonts.dmSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -150,17 +157,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Text('📍 ${project['city']}',
+                        Text('📍 ${event.city}',
                             style: GoogleFonts.dmSans(
                                 fontSize: 11, color: AppColors.whiteDim)),
                         const SizedBox(width: 10),
-                        Text('📅 ${project['date']}',
+                        Text(event.formattedDate,
                             style: GoogleFonts.dmSans(
                                 fontSize: 11, color: AppColors.whiteDim)),
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text('💸 ${project['budget']}',
+                    Text('💸 ${event.formattedBudget}',
                         style: GoogleFonts.dmSans(
                             fontSize: 12, color: AppColors.whiteDim)),
                     const SizedBox(height: 8),

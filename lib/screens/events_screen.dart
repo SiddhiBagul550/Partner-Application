@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/event_service.dart';
@@ -103,9 +104,22 @@ class _EventsScreenState extends State<EventsScreen> {
                 );
               }
               final events = snap.data ?? [];
-              final filtered = _filter == null
-                  ? events
-                  : events.where((e) => e.status == _filter).toList();
+              final vendorEmail = FirebaseAuth.instance.currentUser?.email ?? '';
+
+              final filtered = events.where((e) {
+                // Rule 1: Vanish after 24 hrs of full
+                if (e.isVanishable) return false;
+
+                // Rule 2: Completed only visible if the vendor was part of it
+                if (e.status == EventStatus.completed) {
+                  if (!e.committedVendors.contains(vendorEmail)) return false;
+                }
+
+                // Rule 3: Apply standard pills filter
+                if (_filter != null && e.status != _filter) return false;
+
+                return true;
+              }).toList();
 
               if (filtered.isEmpty) {
                 return _EmptyState(hasFilter: _filter != null);

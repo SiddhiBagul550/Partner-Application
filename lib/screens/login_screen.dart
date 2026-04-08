@@ -2,6 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/vendor_service.dart';
+import '../services/logger_service.dart';
+import 'forgot_password_screen.dart';
+
+// ── Rate-limiting constants ────────────────────────────────────────────────────
+const int _kMaxAttempts = 5;
+const Duration _kLockoutDuration = Duration(minutes: 15);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,13 +18,36 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailCtrl = TextEditingController();
+  final _emailCtrl    = TextEditingController();
   final _passwordCtrl = TextEditingController();
-  bool _isLoading = false;
+  bool  _isLoading    = false;
   String? _error;
 
+  // Local rate-limit state
+  int _failedAttempts = 0;
+  DateTime? _lockedUntil;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  bool get _isLockedOut {
+    if (_lockedUntil == null) return false;
+    return DateTime.now().isBefore(_lockedUntil!);
+  }
+
+  String get _lockoutMessage {
+    if (_lockedUntil == null) return '';
+    final remaining = _lockedUntil!.difference(DateTime.now());
+    final minutes   = remaining.inMinutes + 1;
+    return 'Too many failed attempts. Try again in $minutes minute(s).';
+  }
+
   Future<void> _login() async {
-    final email = _emailCtrl.text.trim();
+    final email    = _emailCtrl.text.trim();
     final password = _passwordCtrl.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
@@ -25,37 +55,89 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    // ── Rate-limit check ────────────────────────────────────────────────────
+    if (_isLockedOut) {
+      setState(() => _error = _lockoutMessage);
+      return;
+    }
+
     setState(() {
       _isLoading = true;
-      _error = null;
+      _error     = null;
     });
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      // MainScaffold handles the transition via Auth changes in main.dart
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        _error = e.message ?? 'An error occurred during login.';
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
+      final userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+
+      final user = userCredential.user;
+
+      // ── Email-verification gate ─────────────────────────────────────────
+      if (user != null && !user.emailVerified) {
+        await FirebaseAuth.instance.signOut();
+        setState(() {
+          _error = 'Please verify your email before signing in.\n'
+                   'Check your inbox for a verification link.';
+          _isLoading = false;
+        });
+        return;
       }
+
+      // ── Vendor-approval check ────────────────────────────────────────────
+      final vendor = await VendorService().getVendorByEmail(email);
+      if (vendor == null || vendor.status != 'approved') {
+        await FirebaseAuth.instance.signOut();
+        setState(() {
+          _isLoading = false;
+          if (vendor == null) {
+            _error = 'Account not found.';
+          } else if (vendor.status == 'suspended') {
+            _error = 'Your account has been suspended.';
+          } else if (vendor.status == 'rejected') {
+            _error = 'Your vendor application was denied.';
+          } else {
+            _error = 'Your application is not approved yet.';
+          }
+        });
+        return;
+      }
+
+      // ── Success: reset counters, MainScaffold handles navigation ─────────
+      _failedAttempts = 0;
+      _lockedUntil    = null;
+
+    } on FirebaseAuthException catch (e) {
+      _failedAttempts++;
+      if (_failedAttempts >= _kMaxAttempts) {
+        _lockedUntil    = DateTime.now().add(_kLockoutDuration);
+        _failedAttempts = 0;
+        LoggerService().logAuthFailure(email, 'Rate limit triggered');
+        setState(() => _error = _lockoutMessage);
+      } else {
+        LoggerService().logAuthFailure(email, e.code);
+        setState(() => _error = _mapFirebaseError(e.code));
+      }
+    } catch (e) {
+      LoggerService().logAuthFailure(email, e.toString());
+      setState(() => _error = 'An unexpected error occurred. Please try again.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  @override
-  void dispose() {
-    _emailCtrl.dispose();
-    _passwordCtrl.dispose();
-    super.dispose();
+  String _mapFirebaseError(String code) {
+    switch (code) {
+      case 'user-not-found':
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Invalid email or password.';
+      case 'invalid-email':
+        return 'Please enter a valid email address.';
+      case 'too-many-requests':
+        return 'Too many failed attempts. Please wait and try again.';
+      default:
+        return 'An error occurred. Please try again.';
+    }
   }
 
   @override
@@ -69,26 +151,11 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Logo placeholder
-              Container(
-                height: 80,
-                width: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppColors.goldGradient,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.goldGlow,
-                      blurRadius: 20,
-                      spreadRadius: 5,
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.camera_alt_outlined,
-                  size: 40,
-                  color: AppColors.black,
-                ),
+              // Logo
+              Image.asset(
+                'assets/images/logo.png',
+                height: 100,
+                fit: BoxFit.contain,
               ),
               const SizedBox(height: 24),
               Text(
@@ -111,7 +178,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 40),
-              
+
+              // Error banner
               if (_error != null) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -135,17 +203,40 @@ class _LoginScreenState extends State<LoginScreen> {
                 label: 'Email Address',
                 icon: Icons.email_outlined,
                 keyboardType: TextInputType.emailAddress,
+                autofillHint: AutofillHints.email,
               ),
               const SizedBox(height: 16),
-              
+
               // Password Field
               _buildTextField(
                 controller: _passwordCtrl,
                 label: 'Password',
                 icon: Icons.lock_outline,
                 obscureText: true,
+                autofillHint: AutofillHints.password,
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 12),
+
+              // Forgot Password
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ForgotPasswordScreen(),
+                    ),
+                  ),
+                  child: Text(
+                    'Forgot password?',
+                    style: GoogleFonts.dmSans(
+                      color: AppColors.gold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
 
               // Login Button
               GestureDetector(
@@ -198,6 +289,7 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     bool obscureText = false,
     TextInputType? keyboardType,
+    String? autofillHint,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -209,13 +301,15 @@ class _LoginScreenState extends State<LoginScreen> {
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
+        autofillHints: autofillHint != null ? [autofillHint] : null,
         style: const TextStyle(color: AppColors.white),
         decoration: InputDecoration(
           hintText: label,
           hintStyle: TextStyle(color: AppColors.whiteDim),
           prefixIcon: Icon(icon, color: AppColors.gold, size: 20),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
       ),
     );

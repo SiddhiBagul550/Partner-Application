@@ -10,6 +10,8 @@ import 'screens/earnings_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/login_screen.dart';
 import 'firebase_options.dart';
+import 'services/vendor_service.dart';
+import 'models/vendor_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -88,6 +90,14 @@ class _MainScaffoldState extends State<MainScaffold> {
         elevation: 0,
         title: Row(
           children: [
+            Image.asset(
+              'assets/images/logo.png',
+              height: 20,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) =>
+                  const Icon(Icons.broken_image, color: AppColors.gold, size: 24),
+            ),
+            const SizedBox(width: 6),
             ShaderMask(
               shaderCallback: (b) => AppColors.goldGradient.createShader(b),
               child: Text(
@@ -102,7 +112,7 @@ class _MainScaffoldState extends State<MainScaffold> {
             ),
             const SizedBox(width: 8),
             Text(
-              titles[_currentIndex].toUpperCase(),
+              'PARTNERS',
               style: GoogleFonts.dmSans(
                 fontSize: 10,
                 color: AppColors.whiteDim,
@@ -114,20 +124,31 @@ class _MainScaffoldState extends State<MainScaffold> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.goldBorder),
-              ),
-              child: Text(
-                '⭐ Gold',
-                style: GoogleFonts.dmSans(
-                  fontSize: 11,
-                  color: AppColors.gold,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+            child: StreamBuilder<VendorModel?>(
+              stream: VendorService().currentVendorStream(),
+              builder: (context, snap) {
+                final tier = snap.data?.tier ?? 'Silver';
+                final tierEmoji = tier == 'Platinum' ? '💎' : (tier == 'Gold' ? '⭐' : '🥈');
+                final tierColor = tier == 'Platinum'
+                    ? const Color(0xFFB0C4DE)
+                    : (tier == 'Gold' ? AppColors.gold : const Color(0xFFAAAAAA));
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: tierColor.withOpacity(0.5)),
+                    color: tierColor.withOpacity(0.08),
+                  ),
+                  child: Text(
+                    '$tierEmoji $tier',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 11,
+                      color: tierColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],

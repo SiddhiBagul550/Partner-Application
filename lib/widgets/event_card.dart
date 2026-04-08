@@ -1,11 +1,11 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
 import '../../models/event_model.dart';
 import '../../services/event_service.dart';
-
-// Dummy vendor ID for prototype since real auth is not yet implemented
-const String currentVendorId = 'dummy_vendor_123';
+import '../../services/vendor_service.dart';
 
 class EventCard extends StatelessWidget {
   final EventModel event;
@@ -14,7 +14,11 @@ class EventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = _statusColors(event.status);
-    return Container(
+    final vendorEmail = FirebaseAuth.instance.currentUser?.email ?? '';
+    final hasApplied = event.committedVendors.contains(vendorEmail);
+    final isFullAndNotApplied = event.isFull && !hasApplied;
+
+    Widget cardContent = Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: AppColors.black4,
@@ -84,12 +88,13 @@ class EventCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // City + category
-                    Row(
+                    // City + roles
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
                         _MetaChip('📍 ${event.city}'),
-                        const SizedBox(width: 8),
-                        _MetaChip(event.category),
+                        ...event.roles.map((r) => _MetaChip('${r.category} (${r.committedVendors.length}/${r.vacancies})')),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -139,8 +144,8 @@ class EventCard extends StatelessWidget {
                           ),
                         ),
                         const Spacer(),
-                        if (event.status == EventStatus.upcoming)
-                          _ApplyButton(event: event),
+                        if (event.status != EventStatus.completed)
+                          _ApplyButton(event: event, hasApplied: hasApplied, vendorEmail: vendorEmail),
                       ],
                     ),
                   ],
@@ -151,6 +156,47 @@ class EventCard extends StatelessWidget {
         ),
       ),
     );
+
+    if (isFullAndNotApplied) {
+      return Stack(
+        children: [
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 3.5, sigmaY: 3.5),
+            child: cardContent,
+          ),
+          Positioned.fill(
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.black2.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.goldBorder),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.lock_outline, color: AppColors.gold, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      'EVENT FULL',
+                      style: GoogleFonts.dmSans(
+                        color: AppColors.gold,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return cardContent;
   }
 
   Map<String, Color> _statusColors(EventStatus s) {
@@ -222,7 +268,9 @@ class _MetaChip extends StatelessWidget {
 
 class _ApplyButton extends StatefulWidget {
   final EventModel event;
-  const _ApplyButton({required this.event});
+  final bool hasApplied;
+  final String vendorEmail;
+  const _ApplyButton({required this.event, required this.hasApplied, required this.vendorEmail});
 
   @override
   State<_ApplyButton> createState() => _ApplyButtonState();
@@ -231,72 +279,182 @@ class _ApplyButton extends StatefulWidget {
 class _ApplyButtonState extends State<_ApplyButton> {
   bool _isLoading = false;
 
+  void _confirmWithdraw() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.black2,
+        title: Text('Withdraw Application', style: GoogleFonts.dmSans(color: AppColors.white)),
+        content: Text(
+          'Are you sure you want to withdraw from "${widget.event.name}"? This will reopen your spot for other vendors.',
+          style: GoogleFonts.dmSans(color: AppColors.whiteDim),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: AppColors.whiteDim))),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _processWithdrawal();
+            },
+            child: const Text('Withdraw', style: TextStyle(color: AppColors.red)),
+          )
+        ],
+      ),
+    );
+  }
+
+  Future<void> _processWithdrawal() async {
+    setState(() => _isLoading = true);
+    try {
+      await EventService().withdrawEvent(widget.event.id, widget.vendorEmail);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Withdrawn from event.', style: GoogleFonts.dmSans(color: AppColors.black)),
+            backgroundColor: AppColors.whiteDim,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Withdrawal failed.', style: GoogleFonts.dmSans(color: Colors.white)), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _processApplicationDialog() async {
+    setState(() => _isLoading = true);
+    try {
+      final vendor = await VendorService().getVendorByEmail(widget.vendorEmail);
+      if (vendor == null) throw Exception('Vendor profile not found');
+      setState(() => _isLoading = false);
+
+      if (!mounted) return;
+      
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: AppColors.black3,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) {
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Select Role', style: GoogleFonts.dmSans(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                const SizedBox(height: 16),
+                ...widget.event.roles.map((role) {
+                  final isRoleFull = role.isFull;
+                  final vendorQualifies = vendor.services.contains(role.category);
+                  
+                  final canApply = !isRoleFull && vendorQualifies;
+                  
+                  return ListTile(
+                    title: Text(role.category, style: GoogleFonts.dmSans(color: Colors.white)),
+                    subtitle: Text(
+                      isRoleFull ? 'Filled (${role.vacancies}/${role.vacancies})' : (vendorQualifies ? 'Open (${role.committedVendors.length}/${role.vacancies})' : 'Missing Qualification'),
+                      style: GoogleFonts.dmSans(color: isRoleFull || !vendorQualifies ? Colors.redAccent : Colors.tealAccent),
+                    ),
+                    trailing: canApply ? const Icon(Icons.arrow_forward_ios, color: AppColors.gold, size: 16) : null,
+                    onTap: canApply ? () {
+                      Navigator.pop(ctx);
+                      _executeApplication(role.category);
+                    } : null,
+                  );
+                }),
+              ],
+            ),
+          );
+        }
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _executeApplication(String categoryRole) async {
+    setState(() => _isLoading = true);
+    try {
+      await EventService().acceptEvent(widget.event.id, widget.vendorEmail, categoryRole);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Applied as $categoryRole for "${widget.event.name}"', style: GoogleFonts.dmSans(color: AppColors.black)),
+            backgroundColor: AppColors.gold,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Application failed. It may be full.', style: GoogleFonts.dmSans(color: Colors.white)), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final hasApplied = widget.event.committedVendors.contains(currentVendorId);
+    final hasApplied = widget.hasApplied;
     final isFull = widget.event.isFull;
-    final isDisabled = hasApplied || isFull || _isLoading;
+    final isDisabled = _isLoading;
 
-    final String buttonText;
-    if (hasApplied) {
-      buttonText = 'Applied';
+    String buttonText;
+    Color buttonColor;
+
+    if (_isLoading) {
+      buttonText = '...';
+      buttonColor = AppColors.whiteDim;
+    } else if (hasApplied) {
+      EventRole? assignedRole;
+      try {
+        assignedRole = widget.event.roles.firstWhere((r) => r.committedVendors.contains(widget.vendorEmail));
+      } catch (_) {}
+      buttonText = assignedRole != null ? 'Withdraw (${assignedRole.category})' : 'Withdraw';
+      buttonColor = AppColors.red;
     } else if (isFull) {
       buttonText = 'Filled';
-    } else if (_isLoading) {
-      buttonText = '...';
+      buttonColor = AppColors.whiteDim;
     } else {
       buttonText = 'Apply';
+      buttonColor = AppColors.gold;
     }
 
+    // You can't apply if it's full AND you haven't applied
+    final cannotTap = isDisabled || (isFull && !hasApplied);
+
     return GestureDetector(
-      onTap: isDisabled
+      onTap: cannotTap
           ? null
-          : () async {
-              setState(() => _isLoading = true);
-              try {
-                await EventService().acceptEvent(widget.event.id, currentVendorId);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Applied for "${widget.event.name}"',
-                          style: GoogleFonts.dmSans(color: AppColors.black)),
-                      backgroundColor: AppColors.gold,
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to apply. Try again.',
-                          style: GoogleFonts.dmSans(color: Colors.white)),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              } finally {
-                if (mounted) setState(() => _isLoading = false);
-              }
-            },
+          : (hasApplied ? _confirmWithdraw : _processApplicationDialog),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           border: Border.all(
-              color: isDisabled
-                  ? AppColors.whiteDim.withOpacity(0.3)
-                  : AppColors.gold),
+              color: cannotTap
+                  ? buttonColor.withOpacity(0.3)
+                  : buttonColor),
           borderRadius: BorderRadius.circular(10),
-          color: isDisabled ? AppColors.whiteDim.withOpacity(0.1) : null,
+          color: cannotTap ? buttonColor.withOpacity(0.1) : (hasApplied ? buttonColor.withOpacity(0.1) : null),
         ),
         child: Text(
           buttonText,
           style: GoogleFonts.dmSans(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: isDisabled
-                ? AppColors.whiteDim.withOpacity(0.6)
-                : AppColors.gold,
+            color: cannotTap
+                ? buttonColor.withOpacity(0.6)
+                : buttonColor,
             letterSpacing: 0.5,
           ),
         ),
