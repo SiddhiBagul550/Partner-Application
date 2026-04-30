@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../services/vendor_service.dart';
 import '../services/logger_service.dart';
 import 'forgot_password_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ── Rate-limiting constants ────────────────────────────────────────────────────
 const int _kMaxAttempts = 5;
@@ -274,6 +275,64 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                   ),
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // Registration Prompt
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.black3,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.gold.withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      'Not a partner yet?',
+                      style: GoogleFonts.dmSans(
+                        color: AppColors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'You can login into the app only after getting approval from the admin via the vendor application.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.dmSans(
+                        color: AppColors.whiteDim,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () async {
+                        final Uri url = Uri.parse('https://partners.fliqaindia.com/vendor/apply');
+                        if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+                          debugPrint('Could not launch \$url');
+                        }
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        backgroundColor: AppColors.gold.withOpacity(0.1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: BorderSide(color: AppColors.gold.withOpacity(0.5)),
+                        ),
+                      ),
+                      child: Text(
+                        'Apply Now',
+                        style: GoogleFonts.dmSans(
+                          color: AppColors.goldLight,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

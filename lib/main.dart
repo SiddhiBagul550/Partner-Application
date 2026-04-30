@@ -15,9 +15,16 @@ import 'models/vendor_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    print("Firebase initialized");
+  } catch (e) {
+    print("Firebase init error: $e");
+  }
+
   runApp(const FliqaIndiaPartnerApp());
 }
 
@@ -30,21 +37,63 @@ class FliqaIndiaPartnerApp extends StatelessWidget {
       title: 'FliqaIndia Partner',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              backgroundColor: AppColors.black,
-              body: Center(child: CircularProgressIndicator(color: AppColors.gold)),
-            );
-          }
-          if (snapshot.hasData && snapshot.data != null) {
-            return const MainScaffold();
-          }
+      home: const AuthWrapper(),
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, authSnap) {
+        if (authSnap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: AppColors.black,
+            body: Center(child: CircularProgressIndicator(color: AppColors.gold)),
+          );
+        }
+
+        final user = authSnap.data;
+        if (user == null) {
           return const LoginScreen();
-        },
-      ),
+        }
+
+        if (!user.emailVerified) {
+          // If the user isn't verified, log them out and show login screen.
+          // We schedule the signout to avoid doing it during build.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+             FirebaseAuth.instance.signOut();
+          });
+          return const LoginScreen();
+        }
+
+        return StreamBuilder<VendorModel?>(
+          stream: VendorService().currentVendorStream(),
+          builder: (context, vendorSnap) {
+            if (vendorSnap.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                backgroundColor: AppColors.black,
+                body: Center(child: CircularProgressIndicator(color: AppColors.gold)),
+              );
+            }
+
+            final vendor = vendorSnap.data;
+            if (vendor != null && vendor.status == 'approved') {
+              return const MainScaffold();
+            }
+
+            // If not approved, sign out.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+               FirebaseAuth.instance.signOut();
+            });
+            return const LoginScreen();
+          },
+        );
+      },
     );
   }
 }

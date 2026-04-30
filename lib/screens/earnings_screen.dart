@@ -19,6 +19,15 @@ class EarningsScreen extends StatelessWidget {
       child: StreamBuilder<VendorModel?>(
         stream: VendorService().currentVendorStream(),
         builder: (context, vendorSnap) {
+          if (vendorSnap.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 60),
+                child: CircularProgressIndicator(color: AppColors.gold),
+              ),
+            );
+          }
+          // Real withdrawable balance from Firestore (admin-set)
           final vendorWallet = vendorSnap.data?.wallet ?? 0.0;
 
           return StreamBuilder<List<EventModel>>(
@@ -75,13 +84,21 @@ class EarningsScreen extends StatelessWidget {
                     crossAxisSpacing: 10,
                     childAspectRatio: 1.7,
                     children: [
-                      _EarnCard(value: formatAmt(totalEarned), label: 'Total Earned'),
-                      _EarnCard(value: formatAmt(vendorWallet), label: 'Withdrawable'),
-                      _EarnCard(value: formatAmt(pending), label: 'Pending'),
-                      _EarnCard(value: formatAmt(commission), label: 'Comm. Dedicated'),
+                      _EarnCard(value: formatAmt(totalEarned), label: 'Est. Total Earned'),
+                      _EarnCard(value: formatAmt(vendorWallet), label: 'Withdrawable ✓', highlight: true),
+                      _EarnCard(value: formatAmt(pending), label: 'Est. Pending'),
+                      _EarnCard(value: formatAmt(commission), label: 'Est. Commission'),
                     ],
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
+                  Text(
+                    '* Est. figures are calculated from event budgets and may differ from final payouts. "Withdrawable" reflects your actual confirmed balance.',
+                    style: GoogleFonts.dmSans(
+                        fontSize: 10,
+                        color: AppColors.whiteDim,
+                        fontStyle: FontStyle.italic),
+                  ),
+                  const SizedBox(height: 14),
                   Divider(color: AppColors.goldBorder.withOpacity(0.4)),
                   const SizedBox(height: 14),
                   Text(
@@ -172,15 +189,19 @@ class EarningsScreen extends StatelessWidget {
 class _EarnCard extends StatelessWidget {
   final String value;
   final String label;
-  const _EarnCard({required this.value, required this.label});
+  final bool highlight;
+  const _EarnCard({required this.value, required this.label, this.highlight = false});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.black4,
+        color: highlight ? AppColors.goldGlow : AppColors.black4,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.goldBorder.withOpacity(0.4)),
+        border: Border.all(
+          color: highlight ? AppColors.gold.withOpacity(0.6) : AppColors.goldBorder.withOpacity(0.4),
+          width: highlight ? 1.5 : 1,
+        ),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -199,12 +220,15 @@ class _EarnCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(label,
               style: GoogleFonts.dmSans(
-                  fontSize: 10, color: AppColors.whiteDim)),
+                  fontSize: 10,
+                  color: highlight ? AppColors.gold : AppColors.whiteDim,
+                  fontWeight: highlight ? FontWeight.w600 : FontWeight.normal)),
         ],
       ),
     );
   }
 }
+
 
 class _PaymentCard extends StatelessWidget {
   final String title;

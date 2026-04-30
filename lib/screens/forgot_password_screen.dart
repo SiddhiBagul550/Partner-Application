@@ -44,15 +44,22 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     });
 
     try {
-      // Call our backend API which uses Resend to send the email from the real domain
       final response = await http.post(
-        Uri.parse('http://localhost:3005/api/password-reset'),
+        Uri.parse('https://us-central1-fliqaindiaweb.cloudfunctions.net/sendEmail'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
+        body: jsonEncode({
+          'to': email,
+          'type': 'password_reset',
+        }),
       );
 
       if (response.statusCode == 200) {
-        setState(() => _sent = true);
+        final data = jsonDecode(response.body);
+        if (data['note'] == 'user-not-found') {
+          setState(() => _error = 'No user found for that email address.');
+        } else {
+          setState(() => _sent = true);
+        }
       } else {
         debugPrint('[ForgotPassword] API Error: ${response.statusCode} - ${response.body}');
         setState(() => _error = 'Failed to send reset email. Please try again.');

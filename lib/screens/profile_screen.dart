@@ -15,13 +15,72 @@ class ProfileScreen extends StatelessWidget {
     return StreamBuilder<VendorModel?>(
       stream: VendorService().currentVendorStream(),
       builder: (context, snapshot) {
+        // Still connecting — show spinner
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: AppColors.black,
+            body: Center(child: CircularProgressIndicator(color: AppColors.gold)),
+          );
+        }
+
         final vendor = snapshot.data;
+
+        // Connected but no vendor found — show error with sign-out
         if (vendor == null) {
-          return const Center(child: CircularProgressIndicator(color: AppColors.gold));
+          return Scaffold(
+            backgroundColor: AppColors.black,
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person_off_outlined, color: AppColors.gold, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Profile Unavailable',
+                      style: GoogleFonts.cormorantGaramond(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.goldLight,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'We could not load your vendor profile. Please sign out and sign in again.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.dmSans(fontSize: 13, color: AppColors.whiteDim),
+                    ),
+                    const SizedBox(height: 24),
+                    TextButton.icon(
+                      onPressed: () => FirebaseAuth.instance.signOut(),
+                      icon: const Icon(Icons.logout, color: AppColors.red, size: 20),
+                      label: Text(
+                        'SIGN OUT',
+                        style: GoogleFonts.dmSans(
+                          color: AppColors.red,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        backgroundColor: AppColors.red.withOpacity(0.1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: AppColors.red.withOpacity(0.5)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
         }
 
         final tier = vendor.tier;
-        final isSilver = tier == 'Silver';
         final isGold = tier == 'Gold';
         final isPlatinum = tier == 'Platinum';
 
@@ -214,7 +273,6 @@ class _TierProgress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    bool isSilverOrAbove = true;
     bool isGoldOrAbove = tier == 'Gold' || tier == 'Platinum';
     bool isPlatinum = tier == 'Platinum';
 
