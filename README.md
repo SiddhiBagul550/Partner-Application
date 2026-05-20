@@ -1,4 +1,4 @@
-# fliqaindia_partner_app
+Partner_app
 
 A new Flutter project.
 
